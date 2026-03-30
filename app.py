@@ -5,6 +5,7 @@ import pandas as pd
 # -----------------------------
 # CONFIG
 # -----------------------------
+GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
 HEADERS = {"Authorization": f"token {GITHUB_TOKEN}"}
 
 # -----------------------------
