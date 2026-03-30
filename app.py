@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
+from datetime import datetime
 
 # -----------------------------
 # CONFIG
@@ -12,58 +13,49 @@ except:
     HEADERS = {}
 
 # -----------------------------
-# FUNÇÃO GENÉRICA (TRATAMENTO DE ERRO)
+# FUNÇÃO BASE
 # -----------------------------
-def fetch_github_data(url):
+def fetch(url):
     response = requests.get(url, headers=HEADERS)
-
     try:
         data = response.json()
     except:
-        st.error("Erro ao interpretar resposta da API")
         return []
 
-    # Se vier erro da API
     if isinstance(data, dict) and "message" in data:
-        st.error(f"Erro da API: {data['message']}")
+        st.error(data["message"])
         return []
 
     return data
 
 # -----------------------------
-# FUNÇÕES
+# API CALLS
 # -----------------------------
 def get_contributors(owner, repo):
-    url = f"https://api.github.com/repos/{owner}/{repo}/contributors"
-    return fetch_github_data(url)
+    return fetch(f"https://api.github.com/repos/{owner}/{repo}/contributors")
 
 def get_pulls(owner, repo):
-    url = f"https://api.github.com/repos/{owner}/{repo}/pulls?state=all"
-    return fetch_github_data(url)
+    return fetch(f"https://api.github.com/repos/{owner}/{repo}/pulls?state=all&per_page=100")
 
 def get_issues(owner, repo):
-    url = f"https://api.github.com/repos/{owner}/{repo}/issues?state=all"
-    return fetch_github_data(url)
+    return fetch(f"https://api.github.com/repos/{owner}/{repo}/issues?state=all&per_page=100")
 
 # -----------------------------
-# STREAMLIT UI
+# UI
 # -----------------------------
-st.title("📊 Engajamento no GitHub")
+st.title("🚀 GitHub Engagement Analytics")
 
-owner = st.text_input("Owner (usuário ou org)")
+owner = st.text_input("Owner")
 repo = st.text_input("Repositório")
 
 if st.button("Analisar"):
-
-    if not owner or not repo:
-        st.warning("Preencha owner e repositório")
-        st.stop()
 
     contributors = get_contributors(owner, repo)
     pulls = get_pulls(owner, repo)
     issues = get_issues(owner, repo)
 
     data = {}
+    timeline = []
 
     # -----------------------------
     # COMMITS
@@ -75,7 +67,8 @@ if st.button("Analisar"):
         user = c["login"]
         data[user] = {
             "commits": c.get("contributions", 0),
-            "pull_requests": 0,
+            "prs_opened": 0,
+            "prs_merged": 0,
             "issues": 0
         }
 
@@ -83,61 +76,100 @@ if st.button("Analisar"):
     # PRs
     # -----------------------------
     for pr in pulls:
-        if "user" not in pr or pr["user"] is None:
+        if not pr.get("user"):
             continue
 
-        user = pr["user"].get("login")
-        if not user:
-            continue
+        user = pr["user"]["login"]
 
         if user not in data:
-            data[user] = {"commits": 0, "pull_requests": 0, "issues": 0}
+            data[user] = {"commits": 0, "prs_opened": 0, "prs_merged": 0, "issues": 0}
 
-        data[user]["pull_requests"] += 1
+        data[user]["prs_opened"] += 1
+
+        # PR aprovado (merged)
+        if pr.get("merged_at"):
+            data[user]["prs_merged"] += 1
+
+        # timeline
+        created = pr.get("created_at")
+        if created:
+            timeline.append({
+                "date": created[:10],
+                "user": user,
+                "type": "PR"
+            })
 
     # -----------------------------
-    # ISSUES (filtrar PRs)
+    # ISSUES
     # -----------------------------
     for issue in issues:
-
-        # GitHub mistura PR com issue → ignorar PR
         if "pull_request" in issue:
             continue
 
-        if "user" not in issue or issue["user"] is None:
+        if not issue.get("user"):
             continue
 
-        user = issue["user"].get("login")
-        if not user:
-            continue
+        user = issue["user"]["login"]
 
         if user not in data:
-            data[user] = {"commits": 0, "pull_requests": 0, "issues": 0}
+            data[user] = {"commits": 0, "prs_opened": 0, "prs_merged": 0, "issues": 0}
 
         data[user]["issues"] += 1
+
+        created = issue.get("created_at")
+        if created:
+            timeline.append({
+                "date": created[:10],
+                "user": user,
+                "type": "ISSUE"
+            })
 
     # -----------------------------
     # DATAFRAME
     # -----------------------------
-    if not data:
-        st.warning("Nenhum dado encontrado. Verifique o repositório ou permissões.")
-        st.stop()
-
     df = pd.DataFrame.from_dict(data, orient="index")
 
+    # 🧠 SCORE INTELIGENTE
     df["score"] = (
-        df["commits"] +
-        df["pull_requests"] * 2 +
-        df["issues"]
+        df["commits"] * 1 +
+        df["prs_opened"] * 2 +
+        df["prs_merged"] * 5 +   # ⭐ PR aprovado vale mais
+        df["issues"] * 1
     )
 
     df = df.sort_values("score", ascending=False)
 
     # -----------------------------
-    # OUTPUT
+    # 🏆 LEADERBOARD
     # -----------------------------
-    st.subheader("📋 Tabela de Engajamento")
+    st.subheader("🏆 Leaderboard")
+
+    top = df.head(10)
+    for i, (user, row) in enumerate(top.iterrows(), start=1):
+        medal = ["🥇", "🥈", "🥉"]
+        prefix = medal[i-1] if i <= 3 else f"{i}º"
+
+        st.write(f"{prefix} **{user}** → Score: {row['score']}")
+
     st.dataframe(df)
 
-    st.subheader("📊 Gráfico")
-    st.bar_chart(df[["commits", "pull_requests", "issues"]])
+    # -----------------------------
+    # 📊 GRÁFICO GERAL
+    # -----------------------------
+    st.subheader("📊 Distribuição")
+    st.bar_chart(df[["commits", "prs_opened", "prs_merged", "issues"]])
+
+    # -----------------------------
+    # 📈 EVOLUÇÃO NO TEMPO
+    # -----------------------------
+    if timeline:
+        df_time = pd.DataFrame(timeline)
+        df_time["date"] = pd.to_datetime(df_time["date"])
+
+        df_time = df_time.groupby("date").size().reset_index(name="atividades")
+
+        st.subheader("📈 Evolução do Engajamento")
+        st.line_chart(df_time.set_index("date"))
+
+    else:
+        st.warning("Sem dados de timeline")
