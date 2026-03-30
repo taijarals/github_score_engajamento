@@ -120,7 +120,6 @@ if st.button("Analisar"):
     # -----------------------------
     df = pd.DataFrame.from_dict(data, orient="index")
 
-    # SCORE
     df["score"] = (
         df["commits"] +
         df["prs_opened"] * 2 +
@@ -165,13 +164,20 @@ if st.button("Analisar"):
 
     df = df.sort_values("score", ascending=False)
 
+    # 🔥 SALVAR PARA OUTRAS PÁGINAS
+    st.session_state["df"] = df
+    st.session_state["timeline"] = timeline
+
     # -----------------------------
     # 🏆 LEADERBOARD
     # -----------------------------
     st.subheader("🏆 Leaderboard")
 
     for i, (user, row) in enumerate(df.head(10).iterrows(), start=1):
-        st.write(f"{i}º {user} | {row['badge']} | Score: {row['score']} | {row['status']}")
+        medal = ["🥇", "🥈", "🥉"]
+        prefix = medal[i-1] if i <= 3 else f"{i}º"
+
+        st.write(f"{prefix} {user} | {row['badge']} | Score: {row['score']} | {row['status']}")
 
     st.dataframe(df)
 
@@ -184,11 +190,11 @@ if st.button("Analisar"):
 
         heatmap = df_time.groupby("date").size().reset_index(name="atividade")
 
-        st.subheader("📊 Heatmap de Atividade")
+        st.subheader("📊 Atividade ao longo do tempo")
         st.bar_chart(heatmap.set_index("date"))
 
     # -----------------------------
-    # 🔔 ALERTA DE QUEDA
+    # 🔔 ALERTA
     # -----------------------------
     if timeline:
         df_time = pd.DataFrame(timeline)
